@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import matplotlib.dates as mdates
 import plotly.express as px
-
+from tksheet import Sheet
 from datetime import datetime
 from tkcalendar import DateEntry
 
@@ -84,6 +84,7 @@ class QueryState:
         self.hora_fin = "23"
         self.min_fin = "59"
         self.df_filtrado = None
+        self.df_tabla=None
 
 
 # -------------------------- Dashboard App --------------------------
@@ -97,137 +98,137 @@ class DashboardApp:
         self.queries = []
         self.current_query = None
 
-        # -------- Layout Frames --------
-        self.sidebar = ctk.CTkFrame(root, width=320, corner_radius=15)
-        self.sidebar.pack(side="left", fill="y", padx=10, pady=10)
+        self.hover_annot = None
+        self.hover_points = []
 
-        self.query_panel = ctk.CTkFrame(root, width=220, corner_radius=15)
-        self.query_panel.pack(side="left", fill="y", padx=(0, 10), pady=10)
+        self.df_tabla = None
+        self.lines = []
 
-        self.main = ctk.CTkFrame(root, corner_radius=15)
-        self.main.pack(side="left", fill="both", expand=True, padx=(0, 10), pady=10)
+    # -------- Layout Frames --------
+        self.top_tabs = ctk.CTkFrame(root, height=55, corner_radius=15)
+        self.top_tabs.pack(side="top", fill="x", padx=10, pady=(10, 5))
 
+        self.body = ctk.CTkFrame(root, fg_color="transparent")
+        self.body.pack(side="top", fill="both", expand=True, padx=10, pady=(0, 10))
+
+        self.sidebar = ctk.CTkFrame(self.body, width=320, corner_radius=15)
+        self.sidebar.pack(side="left", fill="y", padx=(0, 10), pady=0)
+
+        self.main = ctk.CTkFrame(self.body, corner_radius=15)
+        self.main.pack(side="left", fill="both", expand=True, padx=0, pady=0)
         # Build UI
+        self.build_tab_bar()
         self.build_sidebar()
-        self.build_query_panel()
         self.build_main()
-
+        
         # Create first query
         self.nueva_consulta()
 
     # ---------------- Sidebar UI ----------------
     def build_sidebar(self):
         ctk.CTkLabel(self.sidebar, text="BSRN_igf",
-                     font=ctk.CTkFont(size=18, weight="bold")).pack(pady=(15, 15))
+                 font=ctk.CTkFont(size=18, weight="bold")).pack(pady=(15, 10))
 
-        self.file_label = ctk.CTkLabel(self.sidebar, text="No file loaded", text_color="gray")
-        self.file_label.pack(padx=15, pady=(0, 10))
+    # ---- Scrollable content ----
+        self.sidebar_scroll = ctk.CTkScrollableFrame(self.sidebar, fg_color="transparent")
+        self.sidebar_scroll.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
-        ctk.CTkButton(self.sidebar, text="Cargar CSV", command=self.cargar_csv)\
-            .pack(padx=15, pady=5, fill="x")
+        ctk.CTkButton(self.sidebar_scroll, text="Cargar CSV", command=self.cargar_csv)\
+            .pack(padx=5, pady=5, fill="x")
 
-        # Group option menu
-        self.combo = ctk.CTkOptionMenu(
-            self.sidebar,
-            values=list(groups.keys()),
-            command=self.actualizar_variables
-        )
+    # Group option menu
+        self.combo = ctk.CTkOptionMenu(self.sidebar_scroll,values=list(groups.keys()),
+                                       command=self.actualizar_variables)
         self.combo.set("1. Parámetros Básicos")
-        self.combo.pack(padx=15, pady=10, fill="x")
+        self.combo.pack(padx=5, pady=10, fill="x")
 
-        # Variables section
-        ctk.CTkLabel(self.sidebar, text="Variables",
-                     font=ctk.CTkFont(size=14, weight="bold"))\
-            .pack(anchor="w", padx=15, pady=(10, 0))
+    # Variables section
+        ctk.CTkLabel(self.sidebar_scroll, text="Variables",
+                 font=ctk.CTkFont(size=14, weight="bold"))\
+                    .pack(anchor="w", padx=5, pady=(10, 0))
 
         self.search_var = tk.StringVar()
-        self.search_entry = ctk.CTkEntry(self.sidebar, placeholder_text="Search variable...",
-                                         textvariable=self.search_var)
-        self.search_entry.pack(padx=15, pady=(5, 5), fill="x")
+        self.search_entry = ctk.CTkEntry(self.sidebar_scroll,
+        placeholder_text="Buscar variable...",textvariable=self.search_var)
+        self.search_entry.pack(padx=5, pady=(5, 5), fill="x")
         self.search_entry.bind("<KeyRelease>", lambda e: self.filtrar_variables())
 
-        btn_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        btn_frame.pack(padx=15, pady=(0, 5), fill="x")
+        btn_frame = ctk.CTkFrame(self.sidebar_scroll, fg_color="transparent")
+        btn_frame.pack(padx=5, pady=(0, 5), fill="x")
 
-        ctk.CTkButton(btn_frame, text="Select All", command=self.select_all_vars)\
+        ctk.CTkButton(btn_frame, text="Seleccionar todo", command=self.select_all_vars)\
             .pack(side="left", padx=(0, 5), fill="x", expand=True)
 
-        ctk.CTkButton(btn_frame, text="Clear", fg_color="gray30",
-                      hover_color="gray40", command=self.clear_vars)\
+        ctk.CTkButton(btn_frame, text="Limpiar", fg_color="gray30",
+                  hover_color="gray40", command=self.clear_vars)\
             .pack(side="left", padx=(5, 0), fill="x", expand=True)
 
-        self.vars_scroll = ctk.CTkScrollableFrame(self.sidebar, height=180)
-        self.vars_scroll.pack(padx=15, pady=5, fill="both")
+        self.vars_scroll = ctk.CTkScrollableFrame(self.sidebar_scroll, height=150)
+        self.vars_scroll.pack(padx=5, pady=5, fill="both")
 
         self.var_checks = {}
         self.current_vars = []
 
-        # Date filter section
-        ctk.CTkLabel(self.sidebar, text="Fecha inicio").pack(anchor="w", padx=15, pady=(10, 0))
-        frame_ini = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        frame_ini.pack(anchor="w", padx=15)
+    # ---- Date filter ----
+        ctk.CTkLabel(self.sidebar_scroll, text="Fecha inicio").pack(anchor="w", padx=5, pady=(10, 0))
+        frame_ini = ctk.CTkFrame(self.sidebar_scroll, fg_color="transparent")
+        frame_ini.pack(anchor="w", padx=5)
 
         self.fecha_inicio = DateEntry(frame_ini, width=12)
         self.fecha_inicio.pack(side=tk.LEFT)
 
         self.hora_ini = tk.Spinbox(frame_ini, from_=0, to=23, width=3, format="%02.0f",
-                                   command=self.previsualizar)
+                               command=self.previsualizar)
         self.min_ini = tk.Spinbox(frame_ini, from_=0, to=59, width=3, format="%02.0f",
-                                  command=self.previsualizar)
+                              command=self.previsualizar)
 
         self.hora_ini.pack(side=tk.LEFT, padx=2)
         self.min_ini.pack(side=tk.LEFT)
 
-        ctk.CTkLabel(self.sidebar, text="Fecha fin").pack(anchor="w", padx=15, pady=(10, 0))
-        frame_fin = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        frame_fin.pack(anchor="w", padx=15)
+        ctk.CTkLabel(self.sidebar_scroll, text="Fecha fin").pack(anchor="w", padx=5, pady=(10, 0))
+        frame_fin = ctk.CTkFrame(self.sidebar_scroll, fg_color="transparent")
+        frame_fin.pack(anchor="w", padx=5)
 
         self.fecha_fin = DateEntry(frame_fin, width=12)
         self.fecha_fin.pack(side=tk.LEFT)
 
         self.hora_fin = tk.Spinbox(frame_fin, from_=0, to=23, width=3, format="%02.0f",
-                                   command=self.previsualizar)
+                               command=self.previsualizar)
         self.min_fin = tk.Spinbox(frame_fin, from_=0, to=59, width=3, format="%02.0f",
-                                  command=self.previsualizar)
+                              command=self.previsualizar)
 
         self.hora_fin.pack(side=tk.LEFT, padx=2)
         self.min_fin.pack(side=tk.LEFT)
 
-        # Actions
-        ctk.CTkButton(self.sidebar, text="Consultar tabla", command=self.consultar_tabla)\
-            .pack(padx=15, pady=(15, 5), fill="x")
+    # ---- Fixed bottom actions (always visible) ----
+        bottom_actions = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        bottom_actions.pack(fill="x", padx=10, pady=10)
 
-        ctk.CTkButton(self.sidebar, text="Graficar", command=self.grafica_plotly)\
-            .pack(padx=15, pady=5, fill="x")
+        ctk.CTkButton(bottom_actions, text="Consultar tabla", command=self.consultar_tabla)\
+            .pack(fill="x", pady=5)
 
-        ctk.CTkButton(self.sidebar, text="Exportar CSV", command=self.exportar_csv)\
-            .pack(padx=15, pady=5, fill="x")
+        ctk.CTkButton(bottom_actions, text="Graficar", command=self.previsualizar)\
+            .pack(fill="x", pady=5)
 
-    # ---------------- Query Panel UI ----------------
-    def build_query_panel(self):
-        ctk.CTkLabel(self.query_panel, text="Consultas",
-                     font=ctk.CTkFont(size=16, weight="bold")).pack(pady=(15, 10))
+        ctk.CTkButton(bottom_actions, text="Exportar CSV", command=self.exportar_csv)\
+            .pack(fill="x", pady=5)
 
-        self.query_scroll = ctk.CTkScrollableFrame(self.query_panel)
-        self.query_scroll.pack(fill="both", expand=True, padx=10, pady=10)
-
-        self.btn_new_query = ctk.CTkButton(
-            self.query_panel,
-            text="+ Nueva consulta",
-            command=self.nueva_consulta
-        )
-        self.btn_new_query.pack(fill="x", padx=10, pady=(5, 10))
-
-        self.btn_delete_query = ctk.CTkButton(
-            self.query_panel,
-            text="Eliminar consulta",
-            fg_color="#8B0000",
-            hover_color="#A00000",
-            command=self.eliminar_consulta
-        )
-        self.btn_delete_query.pack(fill="x", padx=10, pady=(0, 10))
 
     # ---------------- Main UI ----------------
+    def toolbar_zoom(self):
+        self.mpl_toolbar.zoom()
+
+    def toolbar_pan(self):
+        self.mpl_toolbar.pan()
+
+    def toolbar_home(self):
+        self.mpl_toolbar.home()
+
+    def toolbar_save(self):
+        self.mpl_toolbar.save_figure()
+   
+   
+   
     def build_main(self):
         # Top bar
         top_bar = ctk.CTkFrame(self.main, fg_color="transparent")
@@ -248,22 +249,66 @@ class DashboardApp:
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(fill="x", padx=10, pady=10)
 
+
+        self.mpl_toolbar = NavigationToolbar2Tk(self.canvas, self.main)
+        self.mpl_toolbar.update()
+        self.mpl_toolbar.pack_forget()
+
+        self.hover_annot = self.ax.annotate("",xy=(0, 0),xytext=(15, 15),
+                                            textcoords="offset points",bbox=dict(boxstyle="round", fc="white", ec="black"),
+                                            arrowprops=dict(arrowstyle="->"))
+        self.hover_annot.set_visible(False)
+
+
+
         self.canvas.mpl_connect("motion_notify_event", self.on_hover)
 
-        # Toolbar
-        frame_toolbar = ctk.CTkFrame(self.main)
-        frame_toolbar.pack(fill="x", padx=15, pady=(0, 5))
+        toolbar = ctk.CTkFrame(self.main, fg_color="transparent")
+        toolbar.pack(fill="x", padx=15, pady=(0, 5))
 
-        self.toolbar = NavigationToolbar2Tk(self.canvas, frame_toolbar)
-        self.toolbar.update()
+        ctk.CTkButton(toolbar, text="Zoom", width=90, command=lambda: self.toolbar_zoom()).pack(side="left", padx=5)
+        ctk.CTkButton(toolbar, text="Pan", width=90, command=lambda: self.toolbar_pan()).pack(side="left", padx=5)
+        ctk.CTkButton(toolbar, text="Reset", width=90, command=lambda: self.toolbar_home()).pack(side="left", padx=5)
+        ctk.CTkButton(toolbar, text="Guardar", width=90, command=lambda: self.toolbar_save()).pack(side="left", padx=5)
 
+        self.crear_hover()
+        
         # Table (temporary placeholder)
         self.table_frame = ctk.CTkFrame(self.main)
         self.table_frame.pack(fill="both", expand=True, padx=15, pady=(5, 10))
 
-        self.table_label = ctk.CTkLabel(self.table_frame, text="(Aquí irá la tabla moderna)",
-                                        text_color="gray")
-        self.table_label.pack(pady=30)
+
+        self.sheet = Sheet(self.table_frame)
+        self.sheet.pack(fill="both", expand=True)
+        self.sheet.enable_bindings((
+            "single_select",
+            "row_select",
+            "column_select",
+            "column_width_resize",
+            "arrowkeys",
+            "right_click_popup_menu",
+            "rc_select",
+            "copy"
+            ))
+        
+        self.apply_table_theme()
+
+    def build_tab_bar(self):
+        left = ctk.CTkFrame(self.top_tabs, fg_color="transparent")
+        left.pack(side="left", fill="both", expand=True, padx=10, pady=8)
+
+        self.tabs_scroll = ctk.CTkScrollableFrame(left, height=40, orientation="horizontal")
+        self.tabs_scroll.pack(side="left", fill="x", expand=True)
+
+        right = ctk.CTkFrame(self.top_tabs, fg_color="transparent")
+        right.pack(side="right", padx=10, pady=8)
+
+        ctk.CTkButton(right,text="+ Nueva",width=90,
+                      command=self.nueva_consulta).pack(side="right", padx=5)
+
+        ctk.CTkButton(right,text="Eliminar",width=90,fg_color="#8B0000",
+                      hover_color="#A00000",
+                      command=self.eliminar_consulta).pack(side="right", padx=5)
 
     # ---------------- Queries Logic ----------------
     def nueva_consulta(self):
@@ -293,24 +338,53 @@ class DashboardApp:
         self.cargar_estado_query()
 
     def refresh_query_list(self):
-        for widget in self.query_scroll.winfo_children():
+        for widget in self.tabs_scroll.winfo_children():
             widget.destroy()
 
         for q in self.queries:
             is_active = (q == self.current_query)
 
-            btn = ctk.CTkButton(
-                self.query_scroll,
-                text=q.name,
-                fg_color="gray30" if is_active else "transparent",
-                hover_color="gray40",
-                command=lambda query=q: self.select_query(query)
-            )
-            btn.pack(fill="x", padx=5, pady=5)
+            tab_frame = ctk.CTkFrame(self.tabs_scroll,corner_radius=12,
+                                     fg_color="gray30" if is_active else "transparent")
+            tab_frame.pack(side="left", padx=5, pady=5)
+
+            btn_tab = ctk.CTkButton(tab_frame,text=q.name,fg_color="transparent",
+                                    hover_color="gray40",command=lambda query=q: self.select_query(query),
+                                    width=130)
+            btn_tab.pack(side="left", padx=(5, 0), pady=3)
+
+            btn_close = ctk.CTkButton(tab_frame,text="✖",width=30,fg_color="transparent",
+                                      hover_color="#8B0000",command=lambda query=q: self.cerrar_consulta(query))
+            btn_close.pack(side="left", padx=(2, 5), pady=3)
+
+    def cerrar_consulta(self, query):
+        if len(self.queries) == 1:
+            messagebox.showwarning("Aviso", "No puedes cerrar la última consulta.")
+            return
+
+        if query == self.current_query:
+            idx = self.queries.index(query)
+            self.queries.remove(query)
+
+            if idx > 0:
+                self.current_query = self.queries[idx - 1]
+            else:
+                self.current_query = self.queries[0]
+
+            self.cargar_estado_query()
+        else:
+            self.queries.remove(query)
+
+        self.refresh_query_list()
 
     def select_query(self, query):
         self.guardar_estado_actual()
         self.current_query = query
+
+        self.ax.clear()
+        self.apply_plot_theme()
+        self.canvas.draw_idle()
+
         self.cargar_estado_query()
         self.refresh_query_list()
 
@@ -327,7 +401,7 @@ class DashboardApp:
         q.min_ini = self.min_ini.get()
         q.hora_fin = self.hora_fin.get()
         q.min_fin = self.min_fin.get()
-        q.df_filtrado = self.df_filtrado
+        q.df_tabla = self.df_tabla
 
     def cargar_estado_query(self):
         q = self.current_query
@@ -358,9 +432,19 @@ class DashboardApp:
         self.min_fin.delete(0, tk.END)
         self.min_fin.insert(0, q.min_fin)
 
-        self.df_filtrado = q.df_filtrado
+        if q.df_tabla is not None:
+            self.sheet.headers(list(q.df_tabla.columns))
+            self.sheet.set_sheet_data(q.df_tabla.values.tolist())
+            self.sheet.set_all_column_widths()
+            self.sheet.refresh()
+            self.sheet.redraw()
+        else:
+            self.sheet.set_sheet_data([])
+            self.sheet.headers([])
+            self.sheet.refresh()
+            self.sheet.redraw()
 
-        if self.df_filtrado is not None:
+        if self.df is not None:
             self.previsualizar()
 
     # ---------------- Variables UI ----------------
@@ -426,6 +510,9 @@ class DashboardApp:
             self.previsualizar()
         else:
             self.apply_plot_theme()
+            self.apply_table_theme()
+            self.sheet.refresh()
+            self.sheet.redraw()
             self.canvas.draw_idle()
 
     def apply_plot_theme(self):
@@ -465,7 +552,33 @@ class DashboardApp:
                 legend.get_frame().set_edgecolor("#cccccc")
                 for text in legend.get_texts():
                     text.set_color("black")
+    def apply_table_theme(self):
+        dark = (self.dark_switch.get() == 1)
 
+        if dark:
+            self.sheet.set_options(
+                table_bg="#1e1e1e",
+                table_fg="white",
+                header_bg="#2b2b2b",
+                header_fg="white",
+                index_bg="#2b2b2b",
+                index_fg="white",
+                top_left_bg="#2b2b2b",
+                top_left_fg="white"
+            )
+        else:
+            self.sheet.set_options(
+                table_bg="white",
+                table_fg="black",
+                header_bg="#f0f0f0",
+                header_fg="black",
+                index_bg="#f0f0f0",
+                index_fg="black",
+                top_left_bg="#f0f0f0",
+                top_left_fg="black"
+            )
+        self.sheet.refresh()
+        self.sheet.redraw()
     # ---------------- Main Functions ----------------
     def cargar_csv(self):
         df = seleccion_datos()
@@ -473,7 +586,6 @@ class DashboardApp:
             return
 
         self.df = preprocesamiento(limpieza(df))
-        self.file_label.configure(text="CSV Loaded ✔", text_color="green")
 
         # Auto-set dates
         min_date = self.df["TIMESTAMP"].min()
@@ -520,32 +632,36 @@ class DashboardApp:
             return
 
         vars_sel = self.get_selected_vars()
-        if not vars_sel:
-            return
 
         df_f = self.obtener_filtro()
         if df_f is None or df_f.empty:
+            self.ax.clear()
+            self.lines = []
+            self.canvas.draw_idle()
             return
 
         self.df_filtrado = df_f
 
         self.ax.clear()
+        self.lines = []
         self.apply_plot_theme()
 
         for v in vars_sel:
-            self.ax.plot(self.df_filtrado["TIMESTAMP"], self.df_filtrado[v], label=v)
+            if v not in self.df_filtrado.columns:
+                continue                
 
-        self.ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1), fontsize=9)
+            line, =self.ax.plot(self.df_filtrado["TIMESTAMP"],self.df_filtrado[v],label=v)
+            self.lines.append((v,line))
 
-        self.ax.xaxis.set_major_formatter(mdates.DateFormatter('%d-%m-%Y'))
-        self.ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+        if not self.lines:
+            self.canvas.draw_idle()
+            return
 
+        self.ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1), fontsize=9)  
         self.fig.autofmt_xdate()
         self.fig.tight_layout()
-
         self.canvas.draw_idle()
 
-        self.guardar_estado_actual()
 
     def consultar_tabla(self):
         if self.df is None:
@@ -563,8 +679,19 @@ class DashboardApp:
             return
 
         self.df_filtrado = df_f[["TIMESTAMP"] + vars_sel].copy()
-        self.table_label.configure(text=f"Tabla cargada: {len(self.df_filtrado)} filas")
 
+        self.sheet.set_sheet_data([])
+        self.sheet.headers([])
+
+        self.sheet.headers(list(self.df_filtrado.columns))
+        self.sheet.set_sheet_data(self.df_filtrado.values.tolist())
+
+        self.sheet.refresh()
+        self.sheet.set_all_column_widths()
+        self.sheet.redraw()
+
+        self.df_tabla = self.df_filtrado.copy()
+        self.current_query.df_tabla = self.df_tabla
         self.guardar_estado_actual()
 
     def grafica_plotly(self):
@@ -583,9 +710,54 @@ class DashboardApp:
             self.df_filtrado.to_csv(file, index=False)
             messagebox.showinfo("Exportado", "CSV guardado correctamente")
 
+    
+    def crear_hover(self):
+        self.hover_annot = self.ax.annotate(
+            "",xy=(0, 0),xytext=(15, 15),textcoords="offset points",
+            bbox=dict(boxstyle="round", fc="white", ec="black"),
+            arrowprops=dict(arrowstyle="->")
+            )
+        self.hover_annot.set_visible(False)
+    
     # Placeholder hover function
     def on_hover(self, event):
-        pass
+
+        if not hasattr(self,"lines") or not self.lines:
+            return
+        if self.df_filtrado is None:
+            return
+
+        if event.inaxes != self.ax:
+            if self.hover_annot:
+                self.hover_annot.set_visible(False)
+                self.canvas.draw_idle()
+            return
+
+        visible = False
+
+        for var,line in self.lines:
+            cont,ind = line.contains(event)
+            if cont:
+                idx = ind["ind"][0]
+
+                x = self.df_filtrado["TIMESTAMP"].iloc[idx]
+                y = self.df_filtrado[var].iloc[idx]
+
+
+                texto = f"{var}\n{x.strftime('%Y-%m-%d %H:%M')}\n{y:.2f}"
+
+                self.hover_annot.xy = (mdates.date2num(x), y)
+                self.hover_annot.set_text(texto)
+                self.hover_annot.set_visible(True)
+
+                visible = True
+                break
+
+        if not visible:
+            self.hover_annot.set_visible(False)
+
+        self.canvas.draw_idle()
+        
 
 
 # -------------------- Run App --------------------
