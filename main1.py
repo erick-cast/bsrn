@@ -13,6 +13,10 @@ import plotly.express as px
 from tksheet import Sheet
 from datetime import datetime
 from tkcalendar import DateEntry
+import plotly.io as pio
+import traceback
+
+pio.renderers.default="browser"
 
 
 # -------------------------- Grupos ---------------------
@@ -97,10 +101,12 @@ class DashboardApp:
 
         self.queries = []
         self.current_query = None
+        
+        self.hover_point = {}
+        self.hover_annot = {}
+        self.vars_sel = []
 
-        self.hover_annot = None
-        self.hover_points = []
-
+        self.block_hover = False
         self.df_tabla = None
         self.lines = []
 
@@ -207,7 +213,7 @@ class DashboardApp:
         ctk.CTkButton(bottom_actions, text="Consultar tabla", command=self.consultar_tabla)\
             .pack(fill="x", pady=5)
 
-        ctk.CTkButton(bottom_actions, text="Graficar", command=self.previsualizar)\
+        ctk.CTkButton(bottom_actions, text="Graficar", command=self.grafica_plotly)\
             .pack(fill="x", pady=5)
 
         ctk.CTkButton(bottom_actions, text="Exportar CSV", command=self.exportar_csv)\
@@ -254,13 +260,6 @@ class DashboardApp:
         self.mpl_toolbar.update()
         self.mpl_toolbar.pack_forget()
 
-        self.hover_annot = self.ax.annotate("",xy=(0, 0),xytext=(15, 15),
-                                            textcoords="offset points",bbox=dict(boxstyle="round", fc="white", ec="black"),
-                                            arrowprops=dict(arrowstyle="->"))
-        self.hover_annot.set_visible(False)
-
-
-
         self.canvas.mpl_connect("motion_notify_event", self.on_hover)
 
         toolbar = ctk.CTkFrame(self.main, fg_color="transparent")
@@ -270,13 +269,10 @@ class DashboardApp:
         ctk.CTkButton(toolbar, text="Pan", width=90, command=lambda: self.toolbar_pan()).pack(side="left", padx=5)
         ctk.CTkButton(toolbar, text="Reset", width=90, command=lambda: self.toolbar_home()).pack(side="left", padx=5)
         ctk.CTkButton(toolbar, text="Guardar", width=90, command=lambda: self.toolbar_save()).pack(side="left", padx=5)
-
-        self.crear_hover()
         
         # Table (temporary placeholder)
         self.table_frame = ctk.CTkFrame(self.main)
         self.table_frame.pack(fill="both", expand=True, padx=15, pady=(5, 10))
-
 
         self.sheet = Sheet(self.table_frame)
         self.sheet.pack(fill="both", expand=True)
@@ -378,6 +374,7 @@ class DashboardApp:
         self.refresh_query_list()
 
     def select_query(self, query):
+        self.block_hover =True
         self.guardar_estado_actual()
         self.current_query = query
 
@@ -387,6 +384,8 @@ class DashboardApp:
 
         self.cargar_estado_query()
         self.refresh_query_list()
+
+        self.root.after(150,lambda:setattr(self,"block_hover",False))
 
     def guardar_estado_actual(self):
         q = self.current_query
@@ -401,7 +400,9 @@ class DashboardApp:
         q.min_ini = self.min_ini.get()
         q.hora_fin = self.hora_fin.get()
         q.min_fin = self.min_fin.get()
-        q.df_tabla = self.df_tabla
+        q.df_filtrado = self.df_filtrado
+        q.df_tabla = getattr(self,"df_tabla",None)
+
 
     def cargar_estado_query(self):
         q = self.current_query
@@ -431,11 +432,14 @@ class DashboardApp:
 
         self.min_fin.delete(0, tk.END)
         self.min_fin.insert(0, q.min_fin)
-
+        
+        self.df_filtrado = q.df_filtrado
+        self.df_tabla = q.df_tabla
+        
         if q.df_tabla is not None:
             self.sheet.headers(list(q.df_tabla.columns))
             self.sheet.set_sheet_data(q.df_tabla.values.tolist())
-            self.sheet.set_all_column_widths()
+            self.sheet.set_column_widths([150] * len(q.df_tabla.columns))
             self.sheet.refresh()
             self.sheet.redraw()
         else:
@@ -444,9 +448,13 @@ class DashboardApp:
             self.sheet.refresh()
             self.sheet.redraw()
 
-        if self.df is not None:
-            self.previsualizar()
 
+        if self.df is not None:
+            self.root.after(50,self.previsualizar)
+        else:
+            self.ax.clear()
+            self.apply_plot_theme()
+            self.canvas.draw_idle()
     # ---------------- Variables UI ----------------
     def actualizar_variables(self, value=None):
         grupo = self.combo.get()
@@ -552,6 +560,18 @@ class DashboardApp:
                 legend.get_frame().set_edgecolor("#cccccc")
                 for text in legend.get_texts():
                     text.set_color("black")
+
+        for v, annot in self.hover_annot.items():
+            if dark:
+                annot.get_bbox_patch().set_facecolor("#2b2b2b")
+                annot.get_bbox_patch().set_edgecolor("#ffffff")
+                annot.set_color("white")
+            else:   
+                annot.get_bbox_patch().set_facecolor("white")
+                annot.get_bbox_patch().set_edgecolor("black")
+                annot.set_color("black")
+
+
     def apply_table_theme(self):
         dark = (self.dark_switch.get() == 1)
 
@@ -631,37 +651,63 @@ class DashboardApp:
         if self.df is None:
             return
 
-        vars_sel = self.get_selected_vars()
+        self.vars_sel = self.get_selected_vars()
+
+        if not self.vars_sel:
+            self.ax.clear()
+            self.apply_plot_theme()
+            self.canvas.draw_idle()
+            return
 
         df_f = self.obtener_filtro()
         if df_f is None or df_f.empty:
-            self.ax.clear()
-            self.lines = []
-            self.canvas.draw_idle()
             return
 
         self.df_filtrado = df_f
 
         self.ax.clear()
-        self.lines = []
         self.apply_plot_theme()
+        
+        for a in self.hover_annot.values():
+            a.set_visible(False)
 
-        for v in vars_sel:
+        self.hover_point.clear()
+        self.hover_annot.clear()
+        
+ 
+        for v in self.vars_sel:
             if v not in self.df_filtrado.columns:
                 continue                
 
             line, =self.ax.plot(self.df_filtrado["TIMESTAMP"],self.df_filtrado[v],label=v)
-            self.lines.append((v,line))
+            color = line.get_color()
 
-        if not self.lines:
-            self.canvas.draw_idle()
-            return
+            point, = self.ax.plot([], [], "o", color=color, markersize=7, zorder=10)
+            annot = self.ax.annotate(
+                "",
+                xy=(0, 0),
+                xytext=(15, 15),
+                textcoords="offset points",
+                bbox=dict(boxstyle="round", fc="white", ec="black"),
+                arrowprops=dict(arrowstyle="->")
+            )
+            annot.set_visible(False)
 
+            self.hover_point[v] = point
+            self.hover_annot[v] = annot
+
+       
         self.ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1), fontsize=9)  
+
+        self.ax.xaxis.set_major_formatter(mdates.DateFormatter('%d-%m-%Y'))
+        self.ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+
         self.fig.autofmt_xdate()
         self.fig.tight_layout()
+
         self.canvas.draw_idle()
 
+        self.guardar_estado_actual()
 
     def consultar_tabla(self):
         if self.df is None:
@@ -687,7 +733,7 @@ class DashboardApp:
         self.sheet.set_sheet_data(self.df_filtrado.values.tolist())
 
         self.sheet.refresh()
-        self.sheet.set_all_column_widths()
+        self.sheet.set_all_column_widths(width=150)
         self.sheet.redraw()
 
         self.df_tabla = self.df_filtrado.copy()
@@ -695,10 +741,24 @@ class DashboardApp:
         self.guardar_estado_actual()
 
     def grafica_plotly(self):
-        if self.df_filtrado is not None:
-            vars_sel = self.get_selected_vars()
-            if vars_sel:
-                px.line(self.df_filtrado, x="TIMESTAMP", y=vars_sel).show()
+        if self.df is None:
+            messagebox.showwarning("Aviso", "No hay datos cargados")
+            return
+
+        vars_sel = self.get_selected_vars()
+        if not vars_sel:
+            messagebox.showwarning("Aviso", "Selecciona al menos una variable")
+            return
+
+        df_f = self.obtener_filtro()
+        if df_f is None or df_f.empty:
+            messagebox.showwarning("Aviso", "No hay datos en ese rango")
+            return
+
+        df_plot = df_f[["TIMESTAMP"] + vars_sel].copy()
+
+        fig = px.line(df_plot, x="TIMESTAMP", y=vars_sel, title="Gráfica Plotly")
+        fig.show()
 
     def exportar_csv(self):
         if self.df_filtrado is None:
@@ -721,45 +781,48 @@ class DashboardApp:
     
     # Placeholder hover function
     def on_hover(self, event):
-
-        if not hasattr(self,"lines") or not self.lines:
+        if self.block_hover:
             return
-        if self.df_filtrado is None:
+      
+        if (
+            self.df_filtrado is None or
+            not self.vars_sel or
+            event.inaxes != self.ax or
+            event.xdata is None
+        ):
+            for a in self.hover_annot.values():
+                a.set_visible(False)
+            self.canvas.draw_idle()
             return
 
-        if event.inaxes != self.ax:
-            if self.hover_annot:
-                self.hover_annot.set_visible(False)
-                self.canvas.draw_idle()
-            return
 
-        visible = False
+        xdata = self.df_filtrado["TIMESTAMP"]
+        x_num = mdates.date2num(xdata)
+        idx = np.abs(x_num - event.xdata).argmin()
 
-        for var,line in self.lines:
-            cont,ind = line.contains(event)
-            if cont:
-                idx = ind["ind"][0]
+        x = xdata.iloc[idx]
 
-                x = self.df_filtrado["TIMESTAMP"].iloc[idx]
-                y = self.df_filtrado[var].iloc[idx]
+        for a in self.hover_annot.values():
+            a.set_visible(False)
 
+        for v in self.vars_sel:
+            if v not in self.df_filtrado.columns:
+                continue
 
-                texto = f"{var}\n{x.strftime('%Y-%m-%d %H:%M')}\n{y:.2f}"
+            y = self.df_filtrado[v].iloc[idx]
 
-                self.hover_annot.xy = (mdates.date2num(x), y)
-                self.hover_annot.set_text(texto)
-                self.hover_annot.set_visible(True)
+            point = self.hover_point[v]
+            annot = self.hover_annot[v]
 
-                visible = True
-                break
+            point.set_data([x], [y])
 
-        if not visible:
-            self.hover_annot.set_visible(False)
+            texto = f"{x.strftime('%Y-%m-%d %H:%M')}\n{v}: {y:.2f}"
+
+            annot.xy = (x, y)
+            annot.set_text(texto)
+            annot.set_visible(True)
 
         self.canvas.draw_idle()
-        
-
-
 # -------------------- Run App --------------------
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
@@ -768,6 +831,13 @@ root = ctk.CTk()
 root.title("BSRN_igf Dashboard")
 root.geometry("1700x950")
 root.minsize(1400, 850)
+
+def bgerror_handler(msg):
+    msg = str(msg)
+    if "invalid command name" in msg and ("update" in msg or "check_dpi_scaling" in msg):
+        return
+    print("bgerror:", msg)
+root.tk.createcommand("bgerror", bgerror_handler)        
 
 DashboardApp(root)
 
