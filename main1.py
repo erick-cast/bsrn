@@ -110,6 +110,9 @@ class DashboardApp:
         self.df_tabla = None
         self.lines = []
 
+        self.root.protocol("WM_DELETE_WINDOW",self.on_close_app)
+        self.is_closing = False
+
     # -------- Layout Frames --------
         self.top_tabs = ctk.CTkFrame(root, height=55, corner_radius=15)
         self.top_tabs.pack(side="top", fill="x", padx=10, pady=(10, 5))
@@ -159,15 +162,23 @@ class DashboardApp:
         self.search_entry.pack(padx=5, pady=(5, 5), fill="x")
         self.search_entry.bind("<KeyRelease>", lambda e: self.filtrar_variables())
 
+        # --- Botones Variables (vertical) ---
         btn_frame = ctk.CTkFrame(self.sidebar_scroll, fg_color="transparent")
         btn_frame.pack(padx=5, pady=(0, 5), fill="x")
 
-        ctk.CTkButton(btn_frame, text="Seleccionar todo", command=self.select_all_vars)\
-            .pack(side="left", padx=(0, 5), fill="x", expand=True)
+        ctk.CTkButton(
+            btn_frame,
+            text="Seleccionar todo",
+            command=self.select_all_vars
+            ).pack(fill="x", pady=(0, 5))
 
-        ctk.CTkButton(btn_frame, text="Limpiar", fg_color="gray30",
-                  hover_color="gray40", command=self.clear_vars)\
-            .pack(side="left", padx=(5, 0), fill="x", expand=True)
+        ctk.CTkButton(
+            btn_frame,
+            text="Limpiar",
+            fg_color="gray30",
+            hover_color="gray40",
+            command=self.clear_vars
+            ).pack(fill="x")
 
         self.vars_scroll = ctk.CTkScrollableFrame(self.sidebar_scroll, height=150)
         self.vars_scroll.pack(padx=5, pady=5, fill="both")
@@ -265,10 +276,10 @@ class DashboardApp:
         toolbar = ctk.CTkFrame(self.main, fg_color="transparent")
         toolbar.pack(fill="x", padx=15, pady=(0, 5))
 
-        ctk.CTkButton(toolbar, text="Zoom", width=90, command=lambda: self.toolbar_zoom()).pack(side="left", padx=5)
-        ctk.CTkButton(toolbar, text="Pan", width=90, command=lambda: self.toolbar_pan()).pack(side="left", padx=5)
-        ctk.CTkButton(toolbar, text="Reset", width=90, command=lambda: self.toolbar_home()).pack(side="left", padx=5)
-        ctk.CTkButton(toolbar, text="Guardar", width=90, command=lambda: self.toolbar_save()).pack(side="left", padx=5)
+        ctk.CTkButton(toolbar, text="🔍 Zoom", width=90, command=lambda: self.toolbar_zoom()).pack(side="left", padx=5)
+        ctk.CTkButton(toolbar, text="↔️ Ajustar", width=90, command=lambda: self.toolbar_pan()).pack(side="left", padx=5)
+        ctk.CTkButton(toolbar, text="🔃 Reset", width=90, command=lambda: self.toolbar_home()).pack(side="left", padx=5)
+        ctk.CTkButton(toolbar, text="💾 Guardar", width=90, command=lambda: self.toolbar_save()).pack(side="left", padx=5)
         
         # Table (temporary placeholder)
         self.table_frame = ctk.CTkFrame(self.main)
@@ -301,6 +312,9 @@ class DashboardApp:
 
         ctk.CTkButton(right,text="+ Nueva",width=90,
                       command=self.nueva_consulta).pack(side="right", padx=5)
+
+        ctk.CTkButton(right, text="Renombrar", width=110,
+                      command=self.renombrar_consulta_actual).pack(side="right", padx=5)
 
         ctk.CTkButton(right,text="Eliminar",width=90,fg_color="#8B0000",
                       hover_color="#A00000",
@@ -344,9 +358,14 @@ class DashboardApp:
                                      fg_color="gray30" if is_active else "transparent")
             tab_frame.pack(side="left", padx=5, pady=5)
 
-            btn_tab = ctk.CTkButton(tab_frame,text=q.name,fg_color="transparent",
-                                    hover_color="gray40",command=lambda query=q: self.select_query(query),
-                                    width=130)
+            btn_tab = ctk.CTkButton(
+             tab_frame,
+            text=q.name,
+            fg_color="transparent",
+            hover_color="gray40",
+            command=lambda query=q: self.select_query(query),
+            width=130
+            )
             btn_tab.pack(side="left", padx=(5, 0), pady=3)
 
             btn_close = ctk.CTkButton(tab_frame,text="✖",width=30,fg_color="transparent",
@@ -373,6 +392,29 @@ class DashboardApp:
 
         self.refresh_query_list()
 
+    def renombrar_consulta_actual(self):
+        if self.current_query is None:
+            return
+
+        dialog = ctk.CTkInputDialog(
+            text="Nuevo nombre para la consulta:",
+            title="Renombrar consulta"
+        )
+
+        nuevo = dialog.get_input()
+
+        if nuevo is None:
+            return
+
+        nuevo = nuevo.strip()
+
+        if nuevo == "":
+            messagebox.showwarning("Aviso", "El nombre no puede estar vacío.")
+            return
+
+        self.current_query.name = nuevo
+        self.refresh_query_list()    
+
     def select_query(self, query):
         self.block_hover =True
         self.guardar_estado_actual()
@@ -386,6 +428,36 @@ class DashboardApp:
         self.refresh_query_list()
 
         self.root.after(150,lambda:setattr(self,"block_hover",False))
+
+    def start_rename_query(self, query, btn_widget):
+        self.cancel_rename_query()
+
+        self.rename_query = query
+        self.rename_button = btn_widget
+
+    # desactivar botón para evitar animaciones
+        try:
+            btn_widget.configure(state="disabled")
+        except:
+            pass
+
+        x = btn_widget.winfo_x()
+        y = btn_widget.winfo_y()
+        w = btn_widget.winfo_width()
+        h = btn_widget.winfo_height()
+
+        parent = btn_widget.master
+
+        self.rename_entry = ctk.CTkEntry(parent)
+        self.rename_entry.place(x=x, y=y, width=w, height=h)
+
+        self.rename_entry.insert(0, query.name)
+        self.rename_entry.focus()
+        self.rename_entry.select_range(0, tk.END)
+
+        self.rename_entry.bind("<Return>", lambda e: self.save_rename_query())
+        self.rename_entry.bind("<Escape>", lambda e: self.cancel_rename_query())
+        self.rename_entry.bind("<FocusOut>", lambda e: self.cancel_rename_query())
 
     def guardar_estado_actual(self):
         q = self.current_query
@@ -761,15 +833,26 @@ class DashboardApp:
         fig.show()
 
     def exportar_csv(self):
-        if self.df_filtrado is None:
-            messagebox.showwarning("Aviso", "No hay datos filtrados")
+        if self.df is None:
+            messagebox.showwarning("Aviso", "No hay datos cargados")
             return
+
+        vars_sel = self.get_selected_vars()
+        if not vars_sel:
+            messagebox.showwarning("Aviso", "Selecciona al menos una variable")
+            return
+
+        df_f = self.obtener_filtro()
+        if df_f is None or df_f.empty:
+            messagebox.showwarning("Aviso", "No hay datos para exportar")
+            return
+
+        df_export = df_f[["TIMESTAMP"] + vars_sel].copy()
 
         file = asksaveasfilename(defaultextension=".csv")
         if file:
-            self.df_filtrado.to_csv(file, index=False)
+            df_export.to_csv(file, index=False)
             messagebox.showinfo("Exportado", "CSV guardado correctamente")
-
     
     def crear_hover(self):
         self.hover_annot = self.ax.annotate(
@@ -823,6 +906,17 @@ class DashboardApp:
             annot.set_visible(True)
 
         self.canvas.draw_idle()
+
+    def on_close_app(self):
+        salir = messagebox.askyesno("Salir", "¿Estás seguro de salir del programa?")
+        if salir:
+            self.is_closing = True
+            try:
+                self.root.quit()
+                self.root.after(50, self.root.destroy)
+            except:
+                pass
+
 # -------------------- Run App --------------------
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
@@ -832,12 +926,18 @@ root.title("BSRN_igf Dashboard")
 root.geometry("1700x950")
 root.minsize(1400, 850)
 
-def bgerror_handler(msg):
-    msg = str(msg)
-    if "invalid command name" in msg and ("update" in msg or "check_dpi_scaling" in msg):
+def report_callback_exception(exc, val, tb):
+    msg = ''.join(traceback.format_exception(exc, val, tb))
+
+    # Ignorar errores al cerrar
+    if "application has been destroyed" in msg:
         return
-    print("bgerror:", msg)
-root.tk.createcommand("bgerror", bgerror_handler)        
+    if "invalid command name" in msg and ("check_dpi_scaling" in msg or "update" in msg or "click_animation" in msg):
+        return
+
+    print(msg)
+
+root.report_callback_exception = report_callback_exception       
 
 DashboardApp(root)
 
