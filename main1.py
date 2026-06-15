@@ -1,20 +1,22 @@
 
 import customtkinter as ctk
 import tkinter as tk
+from tkinter import ttk
 from tkinter.filedialog import askopenfilename, asksaveasfilename
 import tkinter.messagebox as messagebox
-
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import matplotlib.dates as mdates
 import plotly.express as px
-from tksheet import Sheet
+#from tksheet import Sheet
 from datetime import datetime
 from tkcalendar import DateEntry
 import plotly.io as pio
 import traceback
+import inspect
+
 
 pio.renderers.default="browser"
 
@@ -231,74 +233,128 @@ class DashboardApp:
             .pack(fill="x", pady=5)
 
 
-    # ---------------- Main UI ----------------
-    def toolbar_zoom(self):
-        self.mpl_toolbar.zoom()
-
-    def toolbar_pan(self):
-        self.mpl_toolbar.pan()
-
-    def toolbar_home(self):
-        self.mpl_toolbar.home()
-
-    def toolbar_save(self):
-        self.mpl_toolbar.save_figure()
-   
-   
-   
+    # ---------------- Main UI ----------------  
     def build_main(self):
-        # Top bar
-        top_bar = ctk.CTkFrame(self.main, fg_color="transparent")
-        top_bar.pack(fill="x", padx=15, pady=(10, 5))
 
-        self.status_label = ctk.CTkLabel(top_bar, text="Ready", text_color="gray")
+    # ---------------- Top Bar ----------------
+        top_bar = ctk.CTkFrame(
+            self.main,
+            fg_color="transparent"
+    )
+
+        top_bar.pack(
+            fill="x",
+            padx=15,
+            pady=(10, 5)
+        )
+
+        self.status_label = ctk.CTkLabel(
+            top_bar,
+            text="Ready",
+            text_color="gray"
+        )
+
         self.status_label.pack(side="left")
 
-        self.dark_switch = ctk.CTkSwitch(top_bar, text="Dark Mode", command=self.toggle_dark)
+        self.dark_switch = ctk.CTkSwitch(
+            top_bar,
+            text="Dark Mode",
+            command=self.toggle_dark
+        )
+
         self.dark_switch.pack(side="right")
 
-        # Plot area
-        frame_plot = ctk.CTkFrame(self.main)
-        frame_plot.pack(fill="x", padx=15, pady=(10, 5))
+    # ---------------- Content Area ----------------
+        content_frame = ctk.CTkFrame(self.main)
+
+        content_frame.pack(
+            fill="both",
+            expand=True,
+            padx=15,
+            pady=(0, 10)
+        )
+
+    # GRID SOLO AQUÍ
+        content_frame.grid_rowconfigure(0, weight=8)   #GRAFICA
+        content_frame.grid_rowconfigure(1, weight=0)    #TOOLBAR
+        content_frame.grid_columnconfigure(0, weight=2) #TABLA
+        content_frame.grid_columnconfigure(0, weight = 1)
+
+    # ---------------- Plot Frame ----------------
+        frame_plot = ctk.CTkFrame(content_frame)
+
+        frame_plot.grid(
+            row=0,
+            column=0,
+            sticky="nsew",
+            pady=(0, 5)
+        )
 
         self.fig, self.ax = plt.subplots(figsize=(12, 5))
-        self.canvas = FigureCanvasTkAgg(self.fig, master=frame_plot)
+
+        self.canvas = FigureCanvasTkAgg(
+            self.fig,
+            master=frame_plot
+        )
+
         self.canvas.draw()
-        self.canvas.get_tk_widget().pack(fill="x", padx=10, pady=10)
 
+        self.canvas.get_tk_widget().pack(
+            fill="both",
+            expand=True,
+            padx=10,
+            pady=10
+        )
 
-        self.mpl_toolbar = NavigationToolbar2Tk(self.canvas, self.main)
+        self.canvas.mpl_connect(
+            "motion_notify_event",
+            self.on_hover
+        )
+
+    # Toolbar matplotlib oculta
+        toolbar_frame = ctk.CTkFrame(content_frame)
+
+        toolbar_frame.grid(
+            row=1,
+            column=0,
+            sticky="ew",
+            pady=(0,5)
+        )
+
+        self.mpl_toolbar = NavigationToolbar2Tk(
+            self.canvas,
+            toolbar_frame
+        )
+
         self.mpl_toolbar.update()
-        self.mpl_toolbar.pack_forget()
 
-        self.canvas.mpl_connect("motion_notify_event", self.on_hover)
+        btn_max = tk.Button(
+            self.mpl_toolbar,
+            text="⛶ Maximizar",
+            command=self.maximizar_grafica
+        )
 
-        toolbar = ctk.CTkFrame(self.main, fg_color="transparent")
-        toolbar.pack(fill="x", padx=15, pady=(0, 5))
+        btn_max.pack(side=tk.LEFT, padx=5)
 
-        ctk.CTkButton(toolbar, text="🔍 Zoom", width=90, command=lambda: self.toolbar_zoom()).pack(side="left", padx=5)
-        ctk.CTkButton(toolbar, text="↔️ Ajustar", width=90, command=lambda: self.toolbar_pan()).pack(side="left", padx=5)
-        ctk.CTkButton(toolbar, text="🔃 Reset", width=90, command=lambda: self.toolbar_home()).pack(side="left", padx=5)
-        ctk.CTkButton(toolbar, text="💾 Guardar", width=90, command=lambda: self.toolbar_save()).pack(side="left", padx=5)
+    # ---------------- Table Frame ----------------
+        self.table_frame = ctk.CTkFrame(content_frame)
+
+        self.table_frame.grid(
+            row=2,
+            column=0,
+            sticky="nsew"
+        )
+        self.tree = ttk.Treeview(self.table_frame,show="headings")
+
+        scroll_y = ttk.Scrollbar(self.table_frame,orient="vertical",command=self.tree.yview)
         
-        # Table (temporary placeholder)
-        self.table_frame = ctk.CTkFrame(self.main)
-        self.table_frame.pack(fill="both", expand=True, padx=15, pady=(5, 10))
+        scroll_x = ttk.Scrollbar(self.table_frame,orient="horizontal",command=self.tree.xview)
 
-        self.sheet = Sheet(self.table_frame)
-        self.sheet.pack(fill="both", expand=True)
-        self.sheet.enable_bindings((
-            "single_select",
-            "row_select",
-            "column_select",
-            "column_width_resize",
-            "arrowkeys",
-            "right_click_popup_menu",
-            "rc_select",
-            "copy"
-            ))
-        
-        self.apply_table_theme()
+        self.tree.configure(yscrollcommand=scroll_y.set,xscrollcommand=scroll_x.set)
+
+        self.tree.pack(side="left",fill="both",expand=True)
+        scroll_y.pack(side="right",fill="y")
+        scroll_x.pack(side="bottom",fill="x")
 
     def build_tab_bar(self):
         left = ctk.CTkFrame(self.top_tabs, fg_color="transparent")
@@ -350,6 +406,13 @@ class DashboardApp:
     def refresh_query_list(self):
         for widget in self.tabs_scroll.winfo_children():
             widget.destroy()
+
+        print("\n----- CONSULTAS -----")
+
+        for q in self.queries:
+            print(q.name,"ACTIVA" if q == self.current_query else "",q.variables)
+
+            print("---------------------\n")
 
         for q in self.queries:
             is_active = (q == self.current_query)
@@ -416,6 +479,7 @@ class DashboardApp:
         self.refresh_query_list()    
 
     def select_query(self, query):
+        print("Cambiando a:",query.name)
         self.block_hover =True
         self.guardar_estado_actual()
         self.current_query = query
@@ -427,37 +491,8 @@ class DashboardApp:
         self.cargar_estado_query()
         self.refresh_query_list()
 
-        self.root.after(150,lambda:setattr(self,"block_hover",False))
-
-    def start_rename_query(self, query, btn_widget):
-        self.cancel_rename_query()
-
-        self.rename_query = query
-        self.rename_button = btn_widget
-
-    # desactivar botón para evitar animaciones
-        try:
-            btn_widget.configure(state="disabled")
-        except:
-            pass
-
-        x = btn_widget.winfo_x()
-        y = btn_widget.winfo_y()
-        w = btn_widget.winfo_width()
-        h = btn_widget.winfo_height()
-
-        parent = btn_widget.master
-
-        self.rename_entry = ctk.CTkEntry(parent)
-        self.rename_entry.place(x=x, y=y, width=w, height=h)
-
-        self.rename_entry.insert(0, query.name)
-        self.rename_entry.focus()
-        self.rename_entry.select_range(0, tk.END)
-
-        self.rename_entry.bind("<Return>", lambda e: self.save_rename_query())
-        self.rename_entry.bind("<Escape>", lambda e: self.cancel_rename_query())
-        self.rename_entry.bind("<FocusOut>", lambda e: self.cancel_rename_query())
+        print("Cargando:",query.name)
+        self.root.after(500,lambda:setattr(self,"block_hover",False))
 
     def guardar_estado_actual(self):
         q = self.current_query
@@ -472,15 +507,23 @@ class DashboardApp:
         q.min_ini = self.min_ini.get()
         q.hora_fin = self.hora_fin.get()
         q.min_fin = self.min_fin.get()
+        
         q.df_filtrado = self.df_filtrado
         q.df_tabla = getattr(self,"df_tabla",None)
 
+        if q.df_filtrado is not None:
+            print("Guardando DF",q.name,q.df_filtrado.shape)
+
+        print("Guardando:",q.name,"vars=",q.variables,"grupo=",q.group)
 
     def cargar_estado_query(self):
         q = self.current_query
         if q is None:
             return
-
+        self.hover_point.clear()
+        self.hover_annot.clear()
+        print( "Cargando:",q.name,q.variables,q.df_tabla is not None)
+        
         self.combo.set(q.group)
         self.actualizar_variables(None)
 
@@ -506,24 +549,34 @@ class DashboardApp:
         self.min_fin.insert(0, q.min_fin)
         
         self.df_filtrado = q.df_filtrado
+        if self.df_filtrado is not None:
+            print("Recuperado DF:",q.name,self.df_filtrado.shape)
         self.df_tabla = q.df_tabla
         
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+
+    # ---------------- Restaurar tabla ----------------
         if q.df_tabla is not None:
-            self.sheet.headers(list(q.df_tabla.columns))
-            self.sheet.set_sheet_data(q.df_tabla.values.tolist())
-            self.sheet.set_column_widths([150] * len(q.df_tabla.columns))
-            self.sheet.refresh()
-            self.sheet.redraw()
-        else:
-            self.sheet.set_sheet_data([])
-            self.sheet.headers([])
-            self.sheet.refresh()
-            self.sheet.redraw()
+            cols = list(q.df_tabla.columns)
 
+            self.tree["columns"] = cols
 
-        if self.df is not None:
-            self.root.after(50,self.previsualizar)
+            for col in cols:
+                self.tree.heading(col, text=col)
+                self.tree.column(col, width=140)
+
+            for row in q.df_tabla.head(1000).itertuples(index=False):
+                self.tree.insert("", "end", values=row)
+
+    # ---------------- Restaurar gráfica ----------------
+        if q.df_filtrado is not None:
+            print("Restaurando grafica:",q.name,q.df_filtrado.shape)
+
+            self.root.after(100, self.previsualizar)
+
         else:
+
             self.ax.clear()
             self.apply_plot_theme()
             self.canvas.draw_idle()
@@ -590,9 +643,6 @@ class DashboardApp:
             self.previsualizar()
         else:
             self.apply_plot_theme()
-            self.apply_table_theme()
-            self.sheet.refresh()
-            self.sheet.redraw()
             self.canvas.draw_idle()
 
     def apply_plot_theme(self):
@@ -645,32 +695,7 @@ class DashboardApp:
 
 
     def apply_table_theme(self):
-        dark = (self.dark_switch.get() == 1)
-
-        if dark:
-            self.sheet.set_options(
-                table_bg="#1e1e1e",
-                table_fg="white",
-                header_bg="#2b2b2b",
-                header_fg="white",
-                index_bg="#2b2b2b",
-                index_fg="white",
-                top_left_bg="#2b2b2b",
-                top_left_fg="white"
-            )
-        else:
-            self.sheet.set_options(
-                table_bg="white",
-                table_fg="black",
-                header_bg="#f0f0f0",
-                header_fg="black",
-                index_bg="#f0f0f0",
-                index_fg="black",
-                top_left_bg="#f0f0f0",
-                top_left_fg="black"
-            )
-        self.sheet.refresh()
-        self.sheet.redraw()
+        pass
     # ---------------- Main Functions ----------------
     def cargar_csv(self):
         df = seleccion_datos()
@@ -720,6 +745,9 @@ class DashboardApp:
         ].copy()
 
     def previsualizar(self):
+
+        print("previsualizar",self.current_query.name,inspect.stack()[1].function)
+
         if self.df is None:
             return
 
@@ -735,7 +763,10 @@ class DashboardApp:
         if df_f is None or df_f.empty:
             return
 
-        self.df_filtrado = df_f
+        self.df_filtrado = df_f[["TIMESTAMP"]+self.vars_sel].copy()
+
+        print("[PREVIEW]",self.current_query.name,"shape=", 
+              self.df_filtrado.shape,"vars=", self.vars_sel)
 
         self.ax.clear()
         self.apply_plot_theme()
@@ -750,6 +781,8 @@ class DashboardApp:
         for v in self.vars_sel:
             if v not in self.df_filtrado.columns:
                 continue                
+
+            print(f"[PLOT] {v} existe={v in self.df_filtrado.columns}")
 
             line, =self.ax.plot(self.df_filtrado["TIMESTAMP"],self.df_filtrado[v],label=v)
             color = line.get_color()
@@ -781,6 +814,55 @@ class DashboardApp:
 
         self.guardar_estado_actual()
 
+    
+    def maximizar_grafica(self):
+        
+        vars_sel = self.get_selected_vars()
+        
+        if self.df_filtrado is None or not vars_sel:
+            messagebox.showwarning(
+            "Aviso",
+            "No hay gráfica para mostrar"
+        )
+            return
+
+        ventana = ctk.CTkToplevel(self.root)
+        ventana.title("Gráfica ampliada")
+
+        ventana.geometry("1600x900")
+        ventana.state("zoomed")  # Windows
+
+        fig, ax = plt.subplots(figsize=(16, 8))
+
+        for v in vars_sel:
+            if v in self.df_filtrado.columns:
+                ax.plot(
+                self.df_filtrado["TIMESTAMP"],
+                self.df_filtrado[v],
+                label=v
+            )
+
+        ax.legend()
+
+        ax.xaxis.set_major_formatter(
+        mdates.DateFormatter('%d-%m-%Y')
+        )
+
+        fig.autofmt_xdate()
+
+        canvas = FigureCanvasTkAgg(fig, master=ventana)
+        canvas.draw()
+        canvas.get_tk_widget().pack(
+            fill="both",
+            expand=True
+        )
+
+        toolbar = NavigationToolbar2Tk(
+            canvas,
+            ventana
+        )
+
+        toolbar.update()
     def consultar_tabla(self):
         if self.df is None:
             messagebox.showwarning("Aviso", "No hay datos cargados")
@@ -798,18 +880,25 @@ class DashboardApp:
 
         self.df_filtrado = df_f[["TIMESTAMP"] + vars_sel].copy()
 
-        self.sheet.set_sheet_data([])
-        self.sheet.headers([])
+        for item in self.tree.get_children():
+            self.tree.delete(item)
 
-        self.sheet.headers(list(self.df_filtrado.columns))
-        self.sheet.set_sheet_data(self.df_filtrado.values.tolist())
+        cols = list(self.df_filtrado.columns)
 
-        self.sheet.refresh()
-        self.sheet.set_all_column_widths(width=150)
-        self.sheet.redraw()
+        self.tree["columns"] = cols
+
+        for col in cols:
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=140)
+
+        MAX_ROWS = 1000
+
+        for row in self.df_filtrado.head(MAX_ROWS).itertuples(index=False):
+            self.tree.insert("", "end", values=row)
 
         self.df_tabla = self.df_filtrado.copy()
         self.current_query.df_tabla = self.df_tabla
+        print("Tabla guardada",self.current_query.name,self.df_tabla.shape)
         self.guardar_estado_actual()
 
     def grafica_plotly(self):
@@ -866,7 +955,8 @@ class DashboardApp:
     def on_hover(self, event):
         if self.block_hover:
             return
-      
+
+        #print("[Hover]")
         if (
             self.df_filtrado is None or
             not self.vars_sel or
@@ -891,7 +981,11 @@ class DashboardApp:
         for v in self.vars_sel:
             if v not in self.df_filtrado.columns:
                 continue
+            if v not in self.hover_point:
+                continue
 
+            if v not in self.hover_annot:
+                continue
             y = self.df_filtrado[v].iloc[idx]
 
             point = self.hover_point[v]
