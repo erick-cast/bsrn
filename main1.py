@@ -277,8 +277,9 @@ class DashboardApp:
     # GRID SOLO AQUÍ
         content_frame.grid_rowconfigure(0, weight=8)   #GRAFICA
         content_frame.grid_rowconfigure(1, weight=0)    #TOOLBAR
-        content_frame.grid_columnconfigure(0, weight=2) #TABLA
-        content_frame.grid_columnconfigure(0, weight = 1)
+        content_frame.grid_rowconfigure(2, weight=5)    #TABLA
+        content_frame.grid_columnconfigure(0, weight=1) 
+
 
     # ---------------- Plot Frame ----------------
         frame_plot = ctk.CTkFrame(content_frame)
@@ -344,17 +345,55 @@ class DashboardApp:
             column=0,
             sticky="nsew"
         )
-        self.tree = ttk.Treeview(self.table_frame,show="headings")
+        self.table_frame.grid_rowconfigure(0, weight=1)
+        self.table_frame.grid_rowconfigure(1, weight=0)
+        self.table_frame.grid_columnconfigure(0, weight=1)
 
-        scroll_y = ttk.Scrollbar(self.table_frame,orient="vertical",command=self.tree.yview)
+        tree_frame = ctk.CTkFrame(self.table_frame)
+        tree_frame.grid(row=0, column=0, sticky="nsew")
+        tree_frame.grid_rowconfigure(0, weight=1)
+        tree_frame.grid_columnconfigure(0, weight=1)
+
+        self.tree = ttk.Treeview(tree_frame,show="headings")
+
+        scroll_y = ttk.Scrollbar(tree_frame,orient="vertical",command=self.tree.yview)
         
-        scroll_x = ttk.Scrollbar(self.table_frame,orient="horizontal",command=self.tree.xview)
 
-        self.tree.configure(yscrollcommand=scroll_y.set,xscrollcommand=scroll_x.set)
+        self.tree.configure(yscrollcommand=scroll_y.set)
 
         self.tree.pack(side="left",fill="both",expand=True)
         scroll_y.pack(side="right",fill="y")
-        scroll_x.pack(side="bottom",fill="x")
+        
+        # ---------- Paginación ----------
+
+        self.page_size = 100
+        self.current_page = 0
+
+        self.page_frame = ctk.CTkFrame(self.table_frame,fg_color="transparent")
+
+        self.page_frame.grid(row=1,column=0,sticky="ew",pady=(5,5))
+
+        self.btn_prev = ctk.CTkButton(
+        self.page_frame,
+        text="← Anterior",
+        width=110,
+        command=self.pagina_anterior
+        )
+
+        self.btn_prev.pack(side="left",padx=20)
+
+        self.lbl_pagina = ctk.CTkLabel(self.page_frame,text="Página 1 de 1")
+
+        self.lbl_pagina.pack(side="left",expand=True)
+
+        self.btn_next = ctk.CTkButton(self.page_frame,
+            text="Siguiente →",width=110,command=self.pagina_siguiente)
+
+        self.btn_next.pack(
+        side="right",
+        padx=20
+        )
+
 
     def build_tab_bar(self):
         left = ctk.CTkFrame(self.top_tabs, fg_color="transparent")
@@ -566,9 +605,11 @@ class DashboardApp:
                 self.tree.heading(col, text=col)
                 self.tree.column(col, width=140)
 
-            for row in q.df_tabla.head(1000).itertuples(index=False):
-                self.tree.insert("", "end", values=row)
+            self.df_tabla = q.df_tabla.copy()
 
+            self.current_page = 0
+
+            self.mostrar_pagina()
     # ---------------- Restaurar gráfica ----------------
         if q.df_filtrado is not None:
             print("Restaurando grafica:",q.name,q.df_filtrado.shape)
@@ -841,6 +882,35 @@ class DashboardApp:
                 self.df_filtrado[v],
                 label=v
             )
+        # Hover independiente ventana maximizada
+        hover_annot = ax.annotate(
+        "",
+        xy=(0, 0),
+        xytext=(15, 15),
+        textcoords="offset points",
+        bbox=dict(
+            boxstyle="round",
+            fc="white",
+            ec="black"
+        ),
+        arrowprops=dict(
+            arrowstyle="->"
+        )
+        )
+
+        hover_annot.set_visible(False)
+
+        hover_point, = ax.plot(
+        [],
+        [],
+        "o",
+        markersize=8,
+        zorder=20
+        )
+
+        hover_point.set_visible(False)
+
+        last_idx = None
 
         ax.legend()
 
@@ -852,17 +922,98 @@ class DashboardApp:
 
         canvas = FigureCanvasTkAgg(fig, master=ventana)
         canvas.draw()
+
         canvas.get_tk_widget().pack(
-            fill="both",
-            expand=True
+        fill="both",
+        expand=True
         )
 
         toolbar = NavigationToolbar2Tk(
-            canvas,
-            ventana
+        canvas,
+        ventana
         )
 
         toolbar.update()
+
+        fechas_num = mdates.date2num(
+        self.df_filtrado["TIMESTAMP"]
+        )        
+        def on_hover_max(event):
+
+            nonlocal last_idx
+
+            if event.inaxes != ax:
+
+                hover_annot.set_visible(False)
+                hover_point.set_visible(False)
+
+                canvas.draw_idle()
+
+                return
+
+            if event.xdata is None:
+                return
+
+            idx = np.abs(
+            fechas_num - event.xdata
+            ).argmin()
+
+            if idx == last_idx:
+                return
+
+            last_idx = idx
+
+            x = self.df_filtrado["TIMESTAMP"].iloc[idx]
+
+            texto = x.strftime(
+            "%Y-%m-%d %H:%M"
+            )
+
+            texto += "\n\n"
+
+            for v in vars_sel:
+
+                if v not in self.df_filtrado.columns:
+                    continue
+
+                try:
+
+                    y_val = self.df_filtrado[v].iloc[idx]
+
+                    texto += (
+                     f"{v}: {y_val:.2f}\n"
+                        )
+
+                except:
+                    pass
+
+            y_ref = self.df_filtrado[
+                vars_sel[0]
+             ].iloc[idx]
+
+            hover_point.set_data(
+             [x],
+                [y_ref]
+             )
+
+            hover_point.set_visible(True)
+
+            hover_annot.xy = (
+            x,
+            y_ref
+            )
+
+            hover_annot.set_text(texto)
+
+            hover_annot.set_visible(True)
+
+            canvas.draw_idle()
+        canvas.mpl_connect(
+            "motion_notify_event",
+            on_hover_max
+        )    
+
+
     def consultar_tabla(self):
         if self.df is None:
             messagebox.showwarning("Aviso", "No hay datos cargados")
@@ -891,15 +1042,63 @@ class DashboardApp:
             self.tree.heading(col, text=col)
             self.tree.column(col, width=140)
 
-        MAX_ROWS = 1000
+        self.df_tabla = self.df_filtrado.copy()
 
-        for row in self.df_filtrado.head(MAX_ROWS).itertuples(index=False):
-            self.tree.insert("", "end", values=row)
+        self.current_page = 0
+
+        self.mostrar_pagina()
 
         self.df_tabla = self.df_filtrado.copy()
         self.current_query.df_tabla = self.df_tabla
         print("Tabla guardada",self.current_query.name,self.df_tabla.shape)
         self.guardar_estado_actual()
+
+    def mostrar_pagina(self):
+            if self.df_tabla is None:
+                return
+
+            if len(self.df_tabla) == 0:
+                return
+
+            if self.df_tabla is None:
+                return
+
+            for item in self.tree.get_children():
+                self.tree.delete(item)
+
+            inicio = self.current_page * self.page_size
+            fin = inicio + self.page_size
+
+            datos = self.df_tabla.iloc[inicio:fin]
+
+            for row in datos.itertuples(index=False):
+                self.tree.insert("", "end", values=row)
+
+            total_paginas = max(1,(len(self.df_tabla) + self.page_size - 1) // self.page_size)
+
+            self.lbl_pagina.configure(
+                text=f"Página {self.current_page+1} de {total_paginas}")
+
+            self.btn_prev.configure(
+            state="normal" if self.current_page > 0 else "disabled")
+
+            self.btn_next.configure(state="normal" if self.current_page < total_paginas-1 else "disabled")
+
+
+    def pagina_siguiente(self):
+        total_paginas = (len(self.df_tabla) + self.page_size - 1) // self.page_size
+
+        if self.current_page < total_paginas-1:
+            self.current_page += 1
+            self.mostrar_pagina()
+
+
+    def pagina_anterior(self):
+
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.mostrar_pagina()
+
 
     def grafica_plotly(self):
         if self.df is None:
